@@ -66,9 +66,12 @@ namespace realm {
 // private:
 //     std::list<std::function<void ()>> m_registered_notifications;
 // };
+class Realm;
 class BindingContext {
 public:
     virtual ~BindingContext() = default;
+
+    std::weak_ptr<Realm> realm;
 
     // If the user adds a notification handler to the Realm, will it ever
     // actually be called?

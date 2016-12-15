@@ -56,6 +56,7 @@ namespace _impl {
     class AnyHandover;
     class CollectionNotifier;
     class ListNotifier;
+    class ObjectNotifier;
     class RealmCoordinator;
     class ResultsNotifier;
     class RealmFriend;
@@ -251,14 +252,12 @@ public:
     // Expose some internal functionality to other parts of the ObjectStore
     // without making it public to everyone
     class Internal {
-        friend class AnyThreadConfined;
-        friend class GlobalNotifier;
+        friend class _impl::AnyHandover;
         friend class _impl::CollectionNotifier;
         friend class _impl::ListNotifier;
+        friend class _impl::ObjectNotifier;
         friend class _impl::RealmCoordinator;
         friend class _impl::ResultsNotifier;
-        friend class _impl::AnyHandover;
-        friend class ThreadSafeReferenceBase;
 
         // ResultsNotifier and ListNotifier need access to the SharedGroup
         // to be able to call the handover functions, which are not very wrappable

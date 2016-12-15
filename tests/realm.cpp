@@ -295,6 +295,7 @@ TEST_CASE("SharedRealm: notifications") {
     size_t change_count = 0;
     auto realm = Realm::get_shared_realm(config);
     realm->m_binding_context.reset(new Context{&change_count});
+    realm->m_binding_context->realm = realm;
 
     SECTION("local notifications are sent synchronously") {
         realm->begin_transaction();
