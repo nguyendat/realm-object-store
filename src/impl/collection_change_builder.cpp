@@ -50,6 +50,18 @@ void CollectionChangeBuilder::merge(CollectionChangeBuilder&& c)
     verify();
     c.verify();
 
+    auto for_each_col = [&](auto&& f) {
+        f(modifications, c.modifications);
+        if (m_track_columns) {
+            if (columns.size() < c.columns.size())
+                columns.resize(c.columns.size());
+            else if (columns.size() > c.columns.size())
+                c.columns.resize(columns.size());
+            for (size_t i = 0; i < columns.size(); ++i)
+                f(columns[i], c.columns[i]);
+        }
+    };
+
     // First update any old moves
     if (!c.moves.empty() || !c.deletions.empty() || !c.insertions.empty()) {
         auto it = std::remove_if(begin(moves), end(moves), [&](auto& old) {
@@ -58,8 +70,10 @@ void CollectionChangeBuilder::merge(CollectionChangeBuilder&& c)
                 return old.to == m.from;
             });
             if (it != c.moves.end()) {
-                if (modifications.contains(it->from))
-                    c.modifications.add(it->to);
+                for_each_col([&](auto& col, auto& other) {
+                    if (col.contains(it->from))
+                        other.add(it->to);
+                });
                 old.to = it->to;
                 *it = c.moves.back();
                 c.moves.pop_back();
@@ -90,8 +104,10 @@ void CollectionChangeBuilder::merge(CollectionChangeBuilder&& c)
     // Ensure that any previously modified rows which were moved are still modified
     if (!modifications.empty() && !c.moves.empty()) {
         for (auto const& move : c.moves) {
-            if (modifications.contains(move.from))
-                c.modifications.add(move.to);
+            for_each_col([&](auto& col, auto& other) {
+                if (col.contains(move.from))
+                    other.add(move.to);
+            });
         }
     }
 
@@ -114,9 +130,11 @@ void CollectionChangeBuilder::merge(CollectionChangeBuilder&& c)
 
     clean_up_stale_moves();
 
-    modifications.erase_at(c.deletions);
-    modifications.shift_for_insert_at(c.insertions);
-    modifications.add(c.modifications);
+    for_each_col([&](auto& col, auto& other) {
+        col.erase_at(c.deletions);
+        col.shift_for_insert_at(c.insertions);
+        col.add(other);
+    });
 
     c = {};
     verify();
@@ -157,7 +175,7 @@ void CollectionChangeBuilder::parse_complete()
 void CollectionChangeBuilder::modify(size_t ndx, size_t col)
 {
     modifications.add(ndx);
-    if (!m_track_columns)
+    if (!m_track_columns || col == IndexSet::npos)
         return;
 
     if (col >= columns.size())
@@ -844,6 +862,7 @@ CollectionChangeSet CollectionChangeBuilder::finalize() &&
         std::move(insertions),
         std::move(modifications_in_old),
         std::move(modifications),
-        std::move(moves)
+        std::move(moves),
+        std::move(columns)
     };
 }

@@ -18,7 +18,7 @@
 
 #include "shared_realm.hpp"
 
-#include "impl/collection_notifier.hpp"
+#include "impl/object_notifier.hpp"
 #include "impl/realm_coordinator.hpp"
 #include "impl/transact_log_handler.hpp"
 

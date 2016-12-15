@@ -34,15 +34,20 @@
 namespace realm {
 class BinaryData;
 class BindingContext;
+class CollectionChangeCallback;
 class Group;
 class Realm;
 class Replication;
 class SharedGroup;
 class StringData;
+class Table;
+struct NotificationToken;
 struct SyncConfig;
 class ThreadSafeReferenceBase;
 template <typename T> class ThreadSafeReference;
 struct VersionID;
+template<typename Table> class BasicRow;
+typedef BasicRow<Table> Row;
 typedef std::shared_ptr<Realm> SharedRealm;
 typedef std::weak_ptr<Realm> WeakRealm;
 
@@ -258,6 +263,7 @@ public:
         friend class _impl::ObjectNotifier;
         friend class _impl::RealmCoordinator;
         friend class _impl::ResultsNotifier;
+        friend class ThreadSafeReferenceBase;
 
         // ResultsNotifier and ListNotifier need access to the SharedGroup
         // to be able to call the handover functions, which are not very wrappable

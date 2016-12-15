@@ -54,7 +54,7 @@ public:
     void merge(CollectionChangeBuilder&&);
 
     void insert(size_t ndx, size_t count=1, bool track_moves=true);
-    void modify(size_t ndx, size_t col=0);
+    void modify(size_t ndx, size_t col=-1);
     void erase(size_t ndx);
     void clear(size_t old_size);
     // }
