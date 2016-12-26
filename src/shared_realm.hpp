@@ -342,6 +342,8 @@ public:
     // FIXME private
     Group& read_group();
 
+    Replication *history() { return m_history.get(); }
+
     friend class _impl::RealmFriend;
 };
 
