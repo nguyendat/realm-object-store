@@ -404,6 +404,46 @@ void SyncSession::create_sync_session()
         }
     };
     m_session->set_sync_transact_callback(std::move(wrapped_callback));
+
+    // Set up the wrapped progress handler callback
+    auto wrapped_progress_handler = [this, weak_self](uint_fast64_t downloaded,
+                                                      uint_fast64_t downloadable,
+                                                      uint_fast64_t uploaded,
+                                                      uint_fast64_t uploadable) {
+        auto self = weak_self.lock();
+        if (!self) {
+            // An update was delivered after the session it relates to was destroyed. There's nothing useful
+            // we can do with it.
+            return;
+        }
+        std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
+        m_current_uploadable = uploadable;
+        m_current_downloadable = downloadable;
+        // Invoke all registered notifiers.
+        std::vector<uint64_t> notifiers_to_remove;
+        for (auto& pair : m_notifiers) {
+            auto& package = pair.second;
+            if (package.is_streaming) {
+                package.notifier(downloaded, downloadable, uploaded, uploadable);
+            } else {
+                if (!package.captured_downloadable) {
+                    // We need to set the initial values.
+                    package.captured_downloadable = downloadable;
+                    package.captured_uploadable = uploadable;
+                }
+                package.notifier(downloaded, package.captured_downloadable, uploaded, package.captured_uploadable);
+                if (*package.captured_uploadable <= uploaded && *package.captured_downloadable <= downloaded) {
+                    notifiers_to_remove.emplace_back(pair.first);
+                }
+            }
+        }
+        // Erase all expired non-streaming notifiers.
+        // A notifier is expired if both the captured values are no longer greater than their current equivalents.
+        for (auto& key : notifiers_to_remove) {
+            m_notifiers.erase(key);
+        }
+    };
+    m_session->set_progress_handler(std::move(wrapped_progress_handler));
 }
 
 void SyncSession::set_sync_transact_callback(std::function<sync::Session::SyncTransactCallback> callback)
@@ -512,6 +552,34 @@ bool SyncSession::wait_for_upload_completion_blocking()
         return true;
     }
     return false;
+}
+
+uint64_t SyncSession::register_progress_notifier(std::function<SyncProgressNotifierCallback> notifier,
+                                                 bool is_streaming)
+{
+    std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
+    uint64_t this_token = m_progress_notifier_token;
+    m_progress_notifier_token++;
+    auto current_downloadable = m_current_downloadable;
+    auto current_uploadable = m_current_uploadable;
+    // If there isn't any data yet, first call the notifier immediately to make this clear.
+    if (!current_downloadable) {
+        notifier(0, none, 0, none);
+    }
+    // Register the notifier now.
+    m_notifiers.insert({this_token, NotifierPackage{
+        std::move(notifier),
+        is_streaming,
+        std::move(current_downloadable),
+        std::move(current_uploadable),
+    }});
+    return this_token;
+}
+
+void SyncSession::unregister_progress_notifier(uint64_t token)
+{
+    std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
+    m_notifiers.erase(token);
 }
 
 void SyncSession::refresh_access_token(std::string access_token, util::Optional<std::string> server_url)
