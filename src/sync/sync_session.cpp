@@ -285,7 +285,9 @@ SyncSession::SyncSession(SyncClient& client, std::string realm_path, SyncConfig 
 void SyncSession::create_sync_session()
 {
     REALM_ASSERT(!m_session);
-    m_session = std::make_unique<sync::Session>(m_client.client, m_realm_path);
+    sync::Session::Config session_config;
+    session_config.changeset_cooker = m_config.transformer.get();
+    m_session = std::make_unique<sync::Session>(m_client.client, m_realm_path, session_config);
 
     // Set up the wrapped handler
     std::weak_ptr<SyncSession> weak_self = shared_from_this();
