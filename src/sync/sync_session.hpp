@@ -76,13 +76,15 @@ public:
     bool wait_for_download_completion(std::function<void(std::error_code)> callback);
 
     // Register a notifier that updates the app regarding progress.
+    // The notifier will always be called immediately during the function, to provide
+    // the caller with an initial assessment of the state of synchronization.
     // If `is_streaming` is true, then the notifier will be called forever, and will
     // always contain the most up-to-date number of downloadable and uploadable bytes.
     // Otherwise, the number of downloaded and uploaded bytes will always be reported
     // relative to the number of downloadable and uploadable bytes at the point in time
     // when the notifier was registered.
     // An integer representing a token is returned. This token can be used to manually
-    // unregister the notifier.
+    // unregister the notifier. If the integer is 0, the notifier was not registered.
     uint64_t register_progress_notifier(std::function<SyncProgressNotifierCallback>, bool is_streaming);
 
     // Unregister a previously registered notifier. If the token is invalid,
@@ -181,10 +183,12 @@ private:
         Optional<uint64_t> captured_uploadable;
     };
     // A counter used as a token for progress notifications.
-    uint64_t m_progress_notifier_token;
+    uint64_t m_progress_notifier_token = 1;
     // How many bytes are uploadable or downloadable, or `none` if we don't know yet.
     Optional<uint64_t> m_current_uploadable;
     Optional<uint64_t> m_current_downloadable;
+    uint64_t m_current_uploaded;
+    uint64_t m_current_downloaded;
     std::unordered_map<uint64_t, NotifierPackage> m_notifiers;
 
     mutable std::mutex m_state_mutex;

@@ -419,6 +419,8 @@ void SyncSession::create_sync_session()
         std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
         m_current_uploadable = uploadable;
         m_current_downloadable = downloadable;
+        m_current_downloaded = downloaded;
+        m_current_uploaded = uploaded;
         // Invoke all registered notifiers.
         std::vector<uint64_t> notifiers_to_remove;
         for (auto& pair : m_notifiers) {
@@ -562,9 +564,16 @@ uint64_t SyncSession::register_progress_notifier(std::function<SyncProgressNotif
     m_progress_notifier_token++;
     auto current_downloadable = m_current_downloadable;
     auto current_uploadable = m_current_uploadable;
-    // If there isn't any data yet, first call the notifier immediately to make this clear.
+    // Always invoke the notifier immediately, to give the user up-to-date info.
     if (!current_downloadable) {
         notifier(0, none, 0, none);
+    } else {
+        notifier(m_current_downloaded, *m_current_downloadable, m_current_uploaded, *m_current_uploadable);
+        if (!is_streaming 
+            && *m_current_downloadable <= m_current_downloaded
+            && *m_current_uploadable <= m_current_uploaded) {
+            return 0;
+        }
     }
     // Register the notifier now.
     m_notifiers.insert({this_token, NotifierPackage{
