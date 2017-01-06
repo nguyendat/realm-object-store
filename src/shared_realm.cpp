@@ -575,17 +575,23 @@ void Realm::notify()
     m_is_sending_notifications = true;
     auto cleanup = util::make_scope_exit([this]() noexcept { m_is_sending_notifications = false; });
 
+    // The SharedRealm could be closed in the callbacks. Keep a ref locally to check if Realm gets closed.
+    auto this_ref = shared_from_this();
     if (m_shared_group->has_changed()) { // Throws
         if (m_binding_context) {
             m_binding_context->changes_available();
+            if (this_ref->is_closed()) return;
         }
+
         if (m_auto_refresh) {
             if (m_group) {
                 m_coordinator->advance_to_ready(*this);
+                if (this_ref->is_closed()) return;
             }
             else  {
                 if (m_binding_context) {
                     m_binding_context->did_change({}, {});
+                    if (this_ref->is_closed()) return;
                 }
                 m_coordinator->process_available_async(*this);
             }

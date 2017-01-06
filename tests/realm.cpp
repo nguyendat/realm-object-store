@@ -383,3 +383,95 @@ TEST_CASE("ShareRealm: in-memory mode from buffer") {
         REQUIRE_THROWS(Realm::get_shared_realm(config3)); // both buffer and encryption
     }
 }
+
+TEST_CASE("ShareRealm: realm closed in notify callback") {
+    TestFile config;
+    config.schema_version = 1;
+    config.schema = Schema{
+        {"object", {
+            {"value", PropertyType::Int, "", "", false, false, false}
+        }},
+    };
+    config.cache = false;
+    auto r1 = Realm::get_shared_realm(config);
+
+    r1->begin_transaction();
+    auto table = r1->read_group().get_table("class_object");
+    auto row_idx = table->add_empty_row(1);
+    auto table_idx = table->get_index_in_group();
+    r1->commit_transaction();
+
+    struct TestContext : public BindingContext {
+        SharedRealm& shared_realm;
+        TestContext(SharedRealm& r) : shared_realm(r) { }
+        //virtual void changes_available() = 0;
+    };
+
+    SECTION("changes_available") {
+        struct Context : public TestContext {
+            Context(SharedRealm& r) : TestContext(r) { }
+            virtual void changes_available() override
+            {
+                shared_realm->close();
+                shared_realm.reset();
+            }
+
+            virtual void will_change(std::vector<ObserverState> const&, std::vector<void*> const&) override
+            {
+                REQUIRE(false);
+            }
+
+            virtual void did_change(std::vector<ObserverState> const&, std::vector<void*> const&, bool) override
+            {
+                REQUIRE(false);
+            }
+        };
+        r1->m_binding_context.reset(new Context(r1));
+    }
+
+    SECTION("will_change") {
+        struct Context : public TestContext {
+            ObserverState state;
+            Context(SharedRealm& r, size_t table_idx, size_t row_idx) : TestContext(r), state{table_idx, row_idx} { }
+
+            virtual std::vector<ObserverState> get_observed_rows() override
+            {
+                return {state};
+            }
+
+            virtual void will_change(std::vector<ObserverState> const&, std::vector<void*> const&) override
+            {
+                shared_realm->close();
+                shared_realm.reset();
+            }
+
+            virtual void did_change(std::vector<ObserverState> const&, std::vector<void*> const&, bool) override
+            {
+                REQUIRE(false);
+            }
+        };
+        r1->m_binding_context.reset(new Context(r1, table_idx, row_idx));
+    }
+
+    SECTION("did_change") {
+        struct Context : public TestContext {
+            Context(SharedRealm& r) : TestContext(r) { }
+            virtual void did_change(std::vector<ObserverState> const&, std::vector<void*> const&, bool) override
+            {
+                shared_realm->close();
+                shared_realm.reset();
+            }
+        };
+        r1->m_binding_context.reset(new Context(r1));
+        r1->invalidate();
+    }
+
+    auto r2 = Realm::get_shared_realm(config);
+    r2->begin_transaction();
+    r2->read_group().get_table("class_object")->add_empty_row(1);
+    r2->commit_transaction();
+    r2.reset();
+
+    r1->notify();
+}
+
