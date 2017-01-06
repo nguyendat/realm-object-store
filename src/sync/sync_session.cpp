@@ -436,7 +436,12 @@ void SyncSession::create_sync_session()
                         package.captured_downloadable = downloadable;
                         package.captured_uploadable = uploadable;
                     }
-                    package.notifier(downloaded, package.captured_downloadable, uploaded, package.captured_uploadable);
+                    invocations.emplace_back([downloaded=downloaded, uploaded=uploaded,
+                                              notifier=package.notifier,
+                                              captured_downloadable=package.captured_downloadable,
+                                              captured_uploadable=package.captured_uploadable](){
+                        notifier(downloaded, captured_downloadable, uploaded, captured_uploadable);
+                    });
                     if (*package.captured_uploadable <= uploaded && *package.captured_downloadable <= downloaded) {
                         // A notifier is expired if both the captured values
                         // are no longer greater than their current equivalents.
