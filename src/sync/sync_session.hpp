@@ -50,10 +50,7 @@ class Session;
 }
 
 using SyncSessionTransactCallback = void(VersionID old_version, VersionID new_version);
-using SyncProgressNotifierCallback = void(uint64_t downloaded_bytes,
-                                          Optional<uint64_t> downloadable_bytes,
-                                          uint64_t uploaded_bytes,
-                                          Optional<uint64_t> uploadable_bytes);
+using SyncProgressNotifierCallback = void(uint64_t transferred_bytes, Optional<uint64_t> transferrable_bytes);
 
 class SyncSession : public std::enable_shared_from_this<SyncSession> {
 public:
@@ -75,14 +72,17 @@ public:
     bool wait_for_upload_completion(std::function<void(std::error_code)> callback);
     bool wait_for_download_completion(std::function<void(std::error_code)> callback);
 
+    enum class NotifierType {
+        upload, download
+    };
     // Register a notifier that updates the app regarding progress.
     // The notifier will always be called immediately during the function, to provide
     // the caller with an initial assessment of the state of synchronization.
     //
     // If `is_streaming` is true, then the notifier will be called forever, and will
-    // always contain the most up-to-date number of downloadable and uploadable bytes.
-    // Otherwise, the number of downloaded and uploaded bytes will always be reported
-    // relative to the number of downloadable and uploadable bytes at the point in time
+    // always contain the most up-to-date number of downloadable or uploadable bytes.
+    // Otherwise, the number of downloaded or uploaded bytes will always be reported
+    // relative to the number of downloadable or uploadable bytes at the point in time
     // when the notifier was registered.
     //
     // An integer representing a token is returned. This token can be used to manually
@@ -90,7 +90,7 @@ public:
     //
     // Note that bindings should dispatch the callback onto a separate thread or queue
     // in order to avoid blocking the sync client.
-    uint64_t register_progress_notifier(std::function<SyncProgressNotifierCallback>, bool is_streaming);
+    uint64_t register_progress_notifier(std::function<SyncProgressNotifierCallback>, NotifierType direction, bool is_streaming);
 
     // Unregister a previously registered notifier. If the token is invalid,
     // this method does nothing.
@@ -184,8 +184,8 @@ private:
     struct NotifierPackage {
         std::function<SyncProgressNotifierCallback> notifier;
         bool is_streaming;
-        Optional<uint64_t> captured_downloadable;
-        Optional<uint64_t> captured_uploadable;
+        NotifierType direction;
+        Optional<uint64_t> captured_transferrable;
     };
     // A counter used as a token for progress notifications.
     uint64_t m_progress_notifier_token = 1;

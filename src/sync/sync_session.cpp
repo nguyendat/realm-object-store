@@ -423,28 +423,25 @@ void SyncSession::create_sync_session()
             m_current_downloadable = downloadable;
             m_current_downloaded = downloaded;
             m_current_uploaded = uploaded;
-            std::vector<uint64_t> notifiers_to_remove;
             for (auto& pair : m_notifiers) {
                 auto& package = pair.second;
+                uint64_t transferred = (package.direction == NotifierType::download ? downloaded : uploaded);
+                uint64_t transferrable = (package.direction == NotifierType::download ? downloadable : uploadable);
                 if (package.is_streaming) {
                     invocations.emplace_back([=, notifier=package.notifier](){
-                        notifier(downloaded, downloadable, uploaded, uploadable);
+                        notifier(transferred, transferrable);
                     });
                 } else {
-                    if (!package.captured_downloadable) {
-                        // We need to set the initial values.
-                        package.captured_downloadable = downloadable;
-                        package.captured_uploadable = uploadable;
+                    if (!package.captured_transferrable) {
+                        package.captured_transferrable = transferrable;
                     }
-                    invocations.emplace_back([downloaded=downloaded, uploaded=uploaded,
-                                              notifier=package.notifier,
-                                              captured_downloadable=package.captured_downloadable,
-                                              captured_uploadable=package.captured_uploadable](){
-                        notifier(downloaded, captured_downloadable, uploaded, captured_uploadable);
+                    invocations.emplace_back([notifier=package.notifier,
+                                              transferred=transferred,
+                                              transferrable=*package.captured_transferrable](){
+                        notifier(transferred, transferrable);
                     });
-                    if (*package.captured_uploadable <= uploaded && *package.captured_downloadable <= downloaded) {
-                        // A notifier is expired if both the captured values
-                        // are no longer greater than their current equivalents.
+                    if (*package.captured_transferrable <= transferred) {
+                        // A notifier is expired if the captured max is no longer greater than the current value.
                         m_notifiers.erase(pair.first);
                     }
                 }
@@ -567,6 +564,7 @@ bool SyncSession::wait_for_upload_completion_blocking()
 }
 
 uint64_t SyncSession::register_progress_notifier(std::function<SyncProgressNotifierCallback> notifier,
+                                                 NotifierType direction,
                                                  bool is_streaming)
 {
     std::function<void()> invocation;
@@ -575,22 +573,18 @@ uint64_t SyncSession::register_progress_notifier(std::function<SyncProgressNotif
         std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
         token_value = m_progress_notifier_token;
         m_progress_notifier_token++;
-        auto current_downloadable = m_current_downloadable;
-        auto current_uploadable = m_current_uploadable;
+        auto current_transferrable = (direction == NotifierType::download ? m_current_downloadable : m_current_uploadable);
+        auto current_transferred = (direction == NotifierType::download ? m_current_downloaded : m_current_uploaded);
         // Always invoke the notifier immediately, to give the user up-to-date info.
-        if (!current_downloadable) {
-            invocation = [notifier=notifier](){ notifier(0, none, 0, none); };
+        if (!current_transferrable) {
+            invocation = [notifier=notifier](){ notifier(0, none); };
         } else {
             invocation = [notifier=notifier,
-                          downloaded=m_current_downloaded,
-                          downloadable=(*m_current_downloadable),
-                          uploaded=m_current_uploaded,
-                          uploadable=(*m_current_uploadable)]() {
-                notifier(downloaded, downloadable, uploaded, uploadable);
+                          transferred=current_transferred,
+                          transferrable=*current_transferrable]() {
+                notifier(transferred, transferrable);
             };
-            if (!is_streaming 
-                && *m_current_downloadable <= m_current_downloaded
-                && *m_current_uploadable <= m_current_uploaded) {
+            if (!is_streaming && *current_transferrable <= current_transferred) {
                 token_value = 0;
             }
         }
@@ -598,8 +592,8 @@ uint64_t SyncSession::register_progress_notifier(std::function<SyncProgressNotif
         m_notifiers.emplace(token_value, NotifierPackage{
             std::move(notifier),
             is_streaming,
-            std::move(current_downloadable),
-            std::move(current_uploadable),
+            direction,
+            std::move(current_transferrable)
         });
     }
     invocation();
