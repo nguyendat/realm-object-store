@@ -412,38 +412,43 @@ void SyncSession::create_sync_session()
                                                       uint_fast64_t uploadable) {
         auto self = weak_self.lock();
         if (!self) {
-            // An update was delivered after the session it relates to was destroyed. There's nothing useful
-            // we can do with it.
+            // An update was delivered after the session it relates to was destroyed.
+            // There's nothing useful we can do with it.
             return;
         }
-        std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
-        m_current_uploadable = uploadable;
-        m_current_downloadable = downloadable;
-        m_current_downloaded = downloaded;
-        m_current_uploaded = uploaded;
-        // Invoke all registered notifiers.
-        std::vector<uint64_t> notifiers_to_remove;
-        for (auto& pair : m_notifiers) {
-            auto& package = pair.second;
-            if (package.is_streaming) {
-                package.notifier(downloaded, downloadable, uploaded, uploadable);
-            } else {
-                if (!package.captured_downloadable) {
-                    // We need to set the initial values.
-                    package.captured_downloadable = downloadable;
-                    package.captured_uploadable = uploadable;
-                }
-                package.notifier(downloaded, package.captured_downloadable, uploaded, package.captured_uploadable);
-                if (*package.captured_uploadable <= uploaded && *package.captured_downloadable <= downloaded) {
-                    notifiers_to_remove.emplace_back(pair.first);
+        std::vector<std::function<void()>> invocations;
+        {
+            std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
+            m_current_uploadable = uploadable;
+            m_current_downloadable = downloadable;
+            m_current_downloaded = downloaded;
+            m_current_uploaded = uploaded;
+            std::vector<uint64_t> notifiers_to_remove;
+            for (auto& pair : m_notifiers) {
+                auto& package = pair.second;
+                if (package.is_streaming) {
+                    invocations.emplace_back([=, notifier=package.notifier](){
+                        notifier(downloaded, downloadable, uploaded, uploadable);
+                    });
+                } else {
+                    if (!package.captured_downloadable) {
+                        // We need to set the initial values.
+                        package.captured_downloadable = downloadable;
+                        package.captured_uploadable = uploadable;
+                    }
+                    package.notifier(downloaded, package.captured_downloadable, uploaded, package.captured_uploadable);
+                    if (*package.captured_uploadable <= uploaded && *package.captured_downloadable <= downloaded) {
+                        // A notifier is expired if both the captured values
+                        // are no longer greater than their current equivalents.
+                        m_notifiers.erase(pair.first);
+                    }
                 }
             }
         }
-        // Erase all expired non-streaming notifiers.
-        // A notifier is expired if both the captured values are no longer greater than their current equivalents.
-        for (auto& key : notifiers_to_remove) {
-            m_notifiers.erase(key);
-        }
+        for (auto& invocation : invocations) {
+            // Run the notifiers only after we've released the lock.
+            invocation();
+        } 
     };
     m_session->set_progress_handler(std::move(wrapped_progress_handler));
 }
@@ -559,30 +564,41 @@ bool SyncSession::wait_for_upload_completion_blocking()
 uint64_t SyncSession::register_progress_notifier(std::function<SyncProgressNotifierCallback> notifier,
                                                  bool is_streaming)
 {
-    std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
-    uint64_t this_token = m_progress_notifier_token;
-    m_progress_notifier_token++;
-    auto current_downloadable = m_current_downloadable;
-    auto current_uploadable = m_current_uploadable;
-    // Always invoke the notifier immediately, to give the user up-to-date info.
-    if (!current_downloadable) {
-        notifier(0, none, 0, none);
-    } else {
-        notifier(m_current_downloaded, *m_current_downloadable, m_current_uploaded, *m_current_uploadable);
-        if (!is_streaming 
-            && *m_current_downloadable <= m_current_downloaded
-            && *m_current_uploadable <= m_current_uploaded) {
-            return 0;
+    std::function<void()> invocation;
+    uint64_t token_value = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
+        token_value = m_progress_notifier_token;
+        m_progress_notifier_token++;
+        auto current_downloadable = m_current_downloadable;
+        auto current_uploadable = m_current_uploadable;
+        // Always invoke the notifier immediately, to give the user up-to-date info.
+        if (!current_downloadable) {
+            invocation = [notifier=notifier](){ notifier(0, none, 0, none); };
+        } else {
+            invocation = [notifier=notifier,
+                          downloaded=m_current_downloaded,
+                          downloadable=(*m_current_downloadable),
+                          uploaded=m_current_uploaded,
+                          uploadable=(*m_current_uploadable)]() {
+                notifier(downloaded, downloadable, uploaded, uploadable);
+            };
+            if (!is_streaming 
+                && *m_current_downloadable <= m_current_downloaded
+                && *m_current_uploadable <= m_current_uploaded) {
+                token_value = 0;
+            }
         }
+        // Register the notifier now.
+        m_notifiers.emplace(token_value, NotifierPackage{
+            std::move(notifier),
+            is_streaming,
+            std::move(current_downloadable),
+            std::move(current_uploadable),
+        });
     }
-    // Register the notifier now.
-    m_notifiers.insert({this_token, NotifierPackage{
-        std::move(notifier),
-        is_streaming,
-        std::move(current_downloadable),
-        std::move(current_uploadable),
-    }});
-    return this_token;
+    invocation();
+    return token_value;
 }
 
 void SyncSession::unregister_progress_notifier(uint64_t token)
