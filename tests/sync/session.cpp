@@ -250,9 +250,6 @@ TEST_CASE("sync: log-in", "[sync]") {
         CHECK(session->is_in_error_state());
     }
 
-    // FIXME: This test currently deadlocks when SyncSession's error handler attempts to change the
-    // session's state. Should be fixed by https://github.com/realm/realm-object-store/pull/181.
-
     SECTION("Session is invalid after invalid token while waiting on download to complete") {
         std::atomic<int> error_count(0);
         auto session = sync_session(server, user, "/test",
