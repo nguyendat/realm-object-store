@@ -185,13 +185,13 @@ private:
         std::function<SyncProgressNotifierCallback> notifier;
         bool is_streaming;
         NotifierType direction;
-        Optional<uint64_t> captured_transferrable;
+        uint64_t captured_transferrable;
     };
     // A counter used as a token for progress notifications.
     uint64_t m_progress_notifier_token = 1;
     // How many bytes are uploadable or downloadable, or `none` if we don't know yet.
-    Optional<uint64_t> m_current_uploadable;
-    Optional<uint64_t> m_current_downloadable;
+    uint64_t m_current_uploadable;
+    uint64_t m_current_downloadable;
     uint64_t m_current_uploaded;
     uint64_t m_current_downloaded;
     std::unordered_map<uint64_t, NotifierPackage> m_notifiers;

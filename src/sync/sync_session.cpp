@@ -435,12 +435,11 @@ void SyncSession::create_sync_session()
                     if (!package.captured_transferrable) {
                         package.captured_transferrable = transferrable;
                     }
-                    invocations.emplace_back([notifier=package.notifier,
-                                              transferred=transferred,
-                                              transferrable=*package.captured_transferrable](){
+                    invocations.emplace_back([=, notifier=package.notifier,
+                                              transferrable=package.captured_transferrable](){
                         notifier(transferred, transferrable);
                     });
-                    if (*package.captured_transferrable <= transferred) {
+                    if (package.captured_transferrable <= transferred) {
                         // A notifier is expired if the captured max is no longer greater than the current value.
                         m_notifiers.erase(pair.first);
                     }
@@ -579,12 +578,10 @@ uint64_t SyncSession::register_progress_notifier(std::function<SyncProgressNotif
         if (!current_transferrable) {
             invocation = [notifier=notifier](){ notifier(0, none); };
         } else {
-            invocation = [notifier=notifier,
-                          transferred=current_transferred,
-                          transferrable=*current_transferrable]() {
-                notifier(transferred, transferrable);
+            invocation = [=, notifier=notifier]() {
+                notifier(current_transferred, current_transferrable);
             };
-            if (!is_streaming && *current_transferrable <= current_transferred) {
+            if (!is_streaming && current_transferrable <= current_transferred) {
                 token_value = 0;
             }
         }

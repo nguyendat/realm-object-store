@@ -290,18 +290,16 @@ TEST_CASE("sync: progress notification", "[sync]") {
         std::atomic<bool> callback_was_called(false);
 
         SECTION("for upload notifications, with no data transfer ongoing") {
-            uint64_t token = session->register_progress_notifier([&](auto, auto) {
+            session->register_progress_notifier([&](auto, auto) {
                 callback_was_called = true;
             }, SyncSession::NotifierType::upload, false);
-            REQUIRE(token == 0);
             EventLoop::main().run_until([&] { return callback_was_called.load(); });
         }
 
         SECTION("for download notifications, with no data transfer ongoing") {
-            uint64_t token = session->register_progress_notifier([&](auto, auto) {
+            session->register_progress_notifier([&](auto, auto) {
                 callback_was_called = true;
             }, SyncSession::NotifierType::download, false);
-            REQUIRE(token == 0);
             EventLoop::main().run_until([&] { return callback_was_called.load(); });
         }
 
