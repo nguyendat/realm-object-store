@@ -312,6 +312,9 @@ std::string SyncSession::get_recovery_file_path()
         int err = errno;
         throw std::system_error(err, std::system_category());
     }
+    // Remove the file so we can use the name for our own file.
+    close(fd);
+    unlink(path.c_str());
     return path;
 }
 
