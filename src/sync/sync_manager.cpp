@@ -160,24 +160,25 @@ bool SyncManager::immediately_run_file_actions(const std::string& realm_path)
         return false;
     }
     auto metadata = SyncFileActionMetadata::metadata_for_path(realm_path, *m_metadata_manager);
-    if (metadata) {
-        auto md = *metadata;
-        switch (md.action()) {
-            case SyncFileActionMetadata::Action::DeleteRealm:
-                // Delete all the files for the given Realm.
+    if (!metadata) {
+        return false;
+    }
+    auto& md = *metadata;
+    switch (md.action()) {
+        case SyncFileActionMetadata::Action::DeleteRealm:
+            // Delete all the files for the given Realm.
+            m_file_manager->remove_realm(md.original_name());
+            md.remove();
+            return true;
+        case SyncFileActionMetadata::Action::HandleRealmForClientReset:
+            // Copy the primary Realm file to the recovery dir, and then delete the Realm.
+            auto new_name = md.new_name();
+            if (new_name && m_file_manager->copy_realm_file_to_recovery_directory(md.original_name(), *new_name)) {
                 m_file_manager->remove_realm(md.original_name());
                 md.remove();
                 return true;
-            case SyncFileActionMetadata::Action::HandleRealmForClientReset:
-                // Copy the primary Realm file to the recovery dir, and then delete the Realm.
-                auto new_name = md.new_name();
-                if (new_name && m_file_manager->copy_realm_file_to_recovery_directory(md.original_name(), *new_name)) {
-                    m_file_manager->remove_realm(md.original_name());
-                    md.remove();
-                    return true;
-                }
-                break;
-        }
+            }
+            break;
     }
     return false;
 }

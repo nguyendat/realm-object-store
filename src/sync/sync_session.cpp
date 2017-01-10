@@ -32,7 +32,8 @@
 #if WIN32
 #include <io.h>
 #include <fcntl.h>
-inline static char * mktemp(char* _template) { static_assert("Please implement me."); }
+
+inline static int mkstemp(char* _template) { return _open(_mktemp(_template), _O_CREAT | _O_TEMPORARY, _S_IREAD | _S_IWRITE); }
 #else
 #include <unistd.h>
 #endif
@@ -304,15 +305,14 @@ std::string SyncSession::get_recovery_file_path()
     std::stringstream stream;
     stream << SyncManager::shared().recovery_directory_path();
     stream << "recovered_realm-" << std::put_time(std::localtime(&now), "%Y%m%d-%H%M%S") << "-XXXXXXXX";
-    std::string path_template = stream.str();
+    std::string path = stream.str();
     // Now try to create the temporary file.
-    char* actual_path = mktemp(&path_template[0]);
-    if (!actual_path) {
+    int fd = mkstemp(&path[0]);
+    if (fd < 0) {
         int err = errno;
-        throw std::runtime_error("Could not generate a unique recovery file path. Underlying error: " + to_string(err));
-        return "";
+        throw std::system_error(err, std::system_category());
     }
-    return actual_path;
+    return path;
 }
 
 // This method should only be called from within the error handler callback registered upon the underlying `m_session`.
@@ -375,12 +375,15 @@ void SyncSession::handle_error(SyncError error)
             case ProtocolError::diverging_histories: {
                 // Add a SyncFileActionMetadata marking the Realm as needing to be deleted.
                 auto recovery_path = get_recovery_file_path();
-                error.user_info[SyncError::c_original_file_path_key] = path();
+                auto original_path = path();
+                error.user_info[SyncError::c_original_file_path_key] = original_path;
                 error.user_info[SyncError::c_recovery_file_path_key] = recovery_path;
-                SyncManager::shared().perform_metadata_update([this, recovery_path=std::move(recovery_path)](const auto& manager) {
+                SyncManager::shared().perform_metadata_update([this,
+                                                               original_path=std::move(original_path),
+                                                               recovery_path=std::move(recovery_path)](const auto& manager) {
                     SyncFileActionMetadata(manager,
                                            SyncFileActionMetadata::Action::HandleRealmForClientReset,
-                                           path(),
+                                           original_path,
                                            m_config.realm_url,
                                            m_config.user->identity(),
                                            util::Optional<std::string>(std::move(recovery_path)));

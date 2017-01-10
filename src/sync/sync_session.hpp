@@ -128,8 +128,13 @@ public:
         }
     };
 
-    // Do NOT call this method. It is public so we can test error handling.
-    void handle_error(SyncError);
+    // Expose some internal functionality to testing code.
+    struct OnlyForTesting {
+        static void handle_error(SyncSession& session, SyncError error)
+        {
+            session.handle_error(std::move(error));
+        }
+    };
 
 private:
     struct State;
@@ -146,6 +151,7 @@ private:
 
     bool can_wait_for_network_completion() const;
 
+    void handle_error(SyncError);
     static std::string get_recovery_file_path();
 
     void set_sync_transact_callback(std::function<SyncSessionTransactCallback>);
