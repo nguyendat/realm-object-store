@@ -169,6 +169,8 @@ private:
 
     bool can_wait_for_network_completion() const;
 
+    void handle_progress_update(uint64_t, uint64_t, uint64_t, uint64_t);
+
     void set_sync_transact_callback(std::function<SyncSessionTransactCallback>);
     void set_error_handler(std::function<SyncSessionErrorHandler>);
     void nonsync_transact_notify(VersionID::version_type);
@@ -189,12 +191,14 @@ private:
     };
     // A counter used as a token for progress notifications.
     uint64_t m_progress_notifier_token = 1;
-    // How many bytes are uploadable or downloadable, or `none` if we don't know yet.
+    // How many bytes are uploadable or downloadable.
     uint64_t m_current_uploadable;
     uint64_t m_current_downloadable;
     uint64_t m_current_uploaded;
     uint64_t m_current_downloaded;
     std::unordered_map<uint64_t, NotifierPackage> m_notifiers;
+
+    std::function<void()> create_notifier_invocation(const NotifierPackage&, bool* is_expired);
 
     mutable std::mutex m_state_mutex;
     mutable std::mutex m_progress_notifier_mutex;

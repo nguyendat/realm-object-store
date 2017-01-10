@@ -283,6 +283,56 @@ SyncSession::SyncSession(SyncClient& client, std::string realm_path, SyncConfig 
 , m_realm_path(std::move(realm_path))
 , m_client(client) { }
 
+void SyncSession::handle_progress_update(uint64_t downloaded,
+                                         uint64_t downloadable,
+                                         uint64_t uploaded,
+                                         uint64_t uploadable)
+{
+    std::vector<std::function<void()>> invocations;
+    {
+        std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
+        m_current_uploadable = uploadable;
+        m_current_downloadable = downloadable;
+        m_current_downloaded = downloaded;
+        m_current_uploaded = uploaded;
+        for (auto& pair : m_notifiers) {
+            bool should_delete = false;
+            invocations.emplace_back(create_notifier_invocation(pair.second, &should_delete));
+            if (should_delete) {
+                m_notifiers.erase(pair.first);
+            }
+        }
+    }
+    // Run the notifiers only after we've released the lock.
+    for (auto& invocation : invocations) {
+        invocation();
+    }
+}
+
+// Create a notifier invocation.
+// Precondition: all four download/upload status member variables have been set to their most up-to-date values.
+std::function<void()> SyncSession::create_notifier_invocation(const NotifierPackage& package,
+                                                              bool* is_expired)
+{
+    REALM_ASSERT(is_expired);
+    uint64_t transferred = (package.direction == NotifierType::download ? m_current_downloaded : m_current_uploaded);
+    uint64_t transferrable = (package.is_streaming
+                              ? (package.direction == NotifierType::download
+                                 ? m_current_downloadable
+                                 : m_current_uploadable)
+                              : package.captured_transferrable);
+    auto invocation = [=](){
+        package.notifier(transferred, transferrable);
+    };
+    if (!package.is_streaming && package.captured_transferrable <= transferred) {
+        // A notifier is expired if the captured max is no longer greater than the current value.
+        *is_expired = true;
+    } else {
+        *is_expired = false;
+    }
+    return invocation;
+}
+
 void SyncSession::create_sync_session()
 {
     REALM_ASSERT(!m_session);
@@ -416,40 +466,7 @@ void SyncSession::create_sync_session()
             // There's nothing useful we can do with it.
             return;
         }
-        std::vector<std::function<void()>> invocations;
-        {
-            std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
-            m_current_uploadable = uploadable;
-            m_current_downloadable = downloadable;
-            m_current_downloaded = downloaded;
-            m_current_uploaded = uploaded;
-            for (auto& pair : m_notifiers) {
-                auto& package = pair.second;
-                uint64_t transferred = (package.direction == NotifierType::download ? downloaded : uploaded);
-                uint64_t transferrable = (package.direction == NotifierType::download ? downloadable : uploadable);
-                if (package.is_streaming) {
-                    invocations.emplace_back([=, notifier=package.notifier](){
-                        notifier(transferred, transferrable);
-                    });
-                } else {
-                    if (!package.captured_transferrable) {
-                        package.captured_transferrable = transferrable;
-                    }
-                    invocations.emplace_back([=, notifier=package.notifier,
-                                              transferrable=package.captured_transferrable](){
-                        notifier(transferred, transferrable);
-                    });
-                    if (package.captured_transferrable <= transferred) {
-                        // A notifier is expired if the captured max is no longer greater than the current value.
-                        m_notifiers.erase(pair.first);
-                    }
-                }
-            }
-        }
-        for (auto& invocation : invocations) {
-            // Run the notifiers only after we've released the lock.
-            invocation();
-        } 
+        self->handle_progress_update(downloaded, downloadable, uploaded, uploadable);
     };
     m_session->set_progress_handler(std::move(wrapped_progress_handler));
 }
@@ -570,28 +587,24 @@ uint64_t SyncSession::register_progress_notifier(std::function<SyncProgressNotif
     uint64_t token_value = 0;
     {
         std::lock_guard<std::mutex> lock(m_progress_notifier_mutex);
+        bool skip_registration = false;
         token_value = m_progress_notifier_token;
         m_progress_notifier_token++;
-        auto current_transferrable = (direction == NotifierType::download ? m_current_downloadable : m_current_uploadable);
-        auto current_transferred = (direction == NotifierType::download ? m_current_downloaded : m_current_uploaded);
-        // Always invoke the notifier immediately, to give the user up-to-date info.
-        if (!current_transferrable) {
-            invocation = [notifier=notifier](){ notifier(0, none); };
-        } else {
-            invocation = [=, notifier=notifier]() {
-                notifier(current_transferred, current_transferrable);
-            };
-            if (!is_streaming && current_transferrable <= current_transferred) {
-                token_value = 0;
-            }
-        }
-        // Register the notifier now.
-        m_notifiers.emplace(token_value, NotifierPackage{
+        auto current_transferrable = (direction == NotifierType::download
+                                      ? m_current_downloadable
+                                      : m_current_uploadable);
+        NotifierPackage package{
             std::move(notifier),
             is_streaming,
             direction,
             std::move(current_transferrable)
-        });
+        };
+        invocation = create_notifier_invocation(package, &skip_registration);
+        if (skip_registration) {
+            token_value = 0;
+        } else {
+            m_notifiers.emplace(token_value, std::move(package));
+        }
     }
     invocation();
     return token_value;
