@@ -128,6 +128,9 @@ public:
         }
     };
 
+    // Do NOT call this method. It is public so we can test error handling.
+    void handle_error(SyncError);
+
 private:
     struct State;
     friend struct _impl::sync_session_states::WaitingForAccessToken;
@@ -142,6 +145,8 @@ private:
     // }
 
     bool can_wait_for_network_completion() const;
+
+    static std::string get_recovery_file_path();
 
     void set_sync_transact_callback(std::function<SyncSessionTransactCallback>);
     void set_error_handler(std::function<SyncSessionErrorHandler>);
